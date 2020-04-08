@@ -4,16 +4,14 @@ extern crate rayon;
 
 use rayon::prelude::*;
 
-use rand::rngs::ThreadRng;
-use rand::{Rng};
+
 use tetra::graphics::{self, Color, Texture};
 use tetra::input::{self, MouseButton};
 use tetra::math::Vec2;
 use tetra::time;
 use tetra::window;
 use tetra::{Context, ContextBuilder, State};
-use std::sync::{Mutex, Arc};
-use std::thread;
+
 
 
 // NOTE: Using a high number here yields worse performance than adding more bunnies over
@@ -22,6 +20,7 @@ use std::thread;
 const WIDTH: i32 = 2560;
 const HEIGHT: i32 = 1400;
 const PIXEL_WIDTH: i32 = 20;
+const TIME_STEP: std::time::Duration = std::time::Duration::from_millis(10);
 
 #[derive(Copy,Clone)]
 struct Cell {
@@ -57,6 +56,8 @@ struct GameState {
     white_pixel: Texture,
     cells: Vec<Vec<Cell>>,
     timer: i32,
+    current_time: std::time::SystemTime,
+    accumulator: std::time::Duration,
     update: bool,
 }
 
@@ -81,6 +82,8 @@ impl GameState {
             white_pixel,
             cells,
             timer: 0,
+            current_time: std::time::SystemTime::now(),
+            accumulator: std::time::Duration::from_secs(0),
             update: true,
         })
     }
@@ -115,56 +118,67 @@ impl State for GameState {
             }
 
         }
-        let tempvec = self.cells.clone();
         
-        //tempvec.get(100).unwrap().get((0-1 + 1) as usize).unwrap();
-        for cellstack in &mut self.cells{
-            if !self.update {
-                break;
-            }
-            //Update Cell State
-            
-            cellstack.par_iter_mut().for_each(|cell|{
-                //println!("{}",rayon::current_num_threads());
-                
-                let xindex = cell.position.0/20;
-                let yindex = cell.position.1/20;
-                let mut count = 0;
+        let frame_time = self.current_time.elapsed().unwrap();
+        self.current_time = std::time::SystemTime::now();
+        self.accumulator+= frame_time;
 
-                for xpos in 0..3{
-                    for ypos in 0..3{
-                        if xpos+xindex-1<0 || xpos+xindex-1 > WIDTH/PIXEL_WIDTH || ypos+yindex-1 < 0 || ypos+yindex-1 > HEIGHT/PIXEL_WIDTH || (xpos == 1 && ypos ==1) {
-                            continue;
-                        }else{
-                            //println!("xindex: {}, xpos: {}, yindex: {}, ypos: {}",xindex,xpos,yindex,ypos);
-                            match tempvec.get((xindex-1 + xpos) as usize).unwrap().get((yindex-1 + ypos) as usize).unwrap().state {
-                                CellState::On =>{
-                                    //println!("test");
-                                    count+=1;
-                                }
-                                CellState::Off =>{
-                                    
+        
+        
+
+        while self.accumulator >= TIME_STEP {
+            let tempvec = self.cells.clone();
+            
+            
+            for cellstack in &mut self.cells{
+                if !self.update {
+                    break;
+                }
+                //Update Cell State
+                
+                cellstack.iter_mut().for_each(|cell|{
+                    //println!("{}",rayon::current_num_threads());
+                    
+                    let xindex = cell.position.0/20;
+                    let yindex = cell.position.1/20;
+                    let mut count = 0;
+
+                    for xpos in 0..3{
+                        for ypos in 0..3{
+                            if xpos+xindex-1<0 || xpos+xindex-1 > WIDTH/PIXEL_WIDTH || ypos+yindex-1 < 0 || ypos+yindex-1 > HEIGHT/PIXEL_WIDTH || (xpos == 1 && ypos ==1) {
+                                continue;
+                            }else{
+                                //println!("xindex: {}, xpos: {}, yindex: {}, ypos: {}",xindex,xpos,yindex,ypos);
+                                match tempvec.get((xindex-1 + xpos) as usize).unwrap().get((yindex-1 + ypos) as usize).unwrap().state {
+                                    CellState::On =>{
+                                        //println!("test");
+                                        count+=1;
+                                    }
+                                    CellState::Off =>{
+                                        
+                                    }
                                 }
                             }
                         }
                     }
-                }
-                match cell.state {
-                    CellState::On =>{
-                        if count == 2 || count == 3 {
+                    match cell.state {
+                        CellState::On =>{
+                            if count == 2 || count == 3 {
 
-                        }else{
-                            cell.state = CellState::Off;
+                            }else{
+                                cell.state = CellState::Off;
+                            }
+                        }
+                        CellState::Off =>{
+                            if count == 3 {
+                                cell.state = CellState::On;
+                            }
                         }
                     }
-                    CellState::Off =>{
-                        if count == 3 {
-                            cell.state = CellState::On;
-                        }
-                    }
-                }
 
-            })
+                })
+            }
+            self.accumulator -= TIME_STEP;
         }
         if input::is_key_down(ctx,input::Key::A){
             fn set_cell_state(cells: &mut Vec<Vec<Cell>>, x: i32, y: i32, state: bool) {
@@ -190,8 +204,10 @@ impl State for GameState {
                     set_cell_state(self.cells.as_mut(),x,y,true);
                 }
             }
-
         }
+
+        
+    
 
         Ok(())
     }
